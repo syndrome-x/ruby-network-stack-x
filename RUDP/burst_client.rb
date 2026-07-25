@@ -1,4 +1,5 @@
 require "socket"
+require_relative "lib/packet"
 
 # Sends a burst of numbered packets to the server as fast as possible, then
 # listens for a few seconds to see which ACKs come back, and in what order.
@@ -22,17 +23,21 @@ socket = UDPSocket.new
 #    number -- we don't wait for an ACK between sends, since the whole
 #    point here is to see what un-retried UDP delivery looks like.
 PACKET_COUNT.times do |seq|
-  packet = "SEQ|#{seq}|packet #{seq}"
-  socket.send(packet, 0, HOST, PORT)
-  puts "sent #{packet.inspect}"
+  packet = Packet.data(seq, "packet #{seq}")
+  socket.send(packet.to_s, 0, HOST, PORT)
+  puts "sent #{packet}"
 end
 
 # 2. Collect whatever ACKs arrive within the listen window.
 received_seqs = []
-deadline = Time.now + LISTEN_SECONDS
+# CLOCK_MONOTONIC only ever moves forward (unlike Time.now, which can jump
+# backward on a system clock adjustment) -- important here since a
+# backward jump would make `remaining` come out too large and this loop
+# would wait far longer than LISTEN_SECONDS actually intends.
+deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + LISTEN_SECONDS
 
 loop do
-  remaining = deadline - Time.now
+  remaining = deadline - Process.clock_gettime(Process::CLOCK_MONOTONIC)
   break if remaining <= 0
 
   # IO.select blocks until `socket` has data to read, OR `remaining`
@@ -41,14 +46,11 @@ loop do
   ready = IO.select([socket], nil, nil, remaining)
   break unless ready # nil means we timed out with nothing left to read
 
-  reply, _sender = socket.recvfrom(1024) # _sender: leading underscore signals "intentionally unused"
+  reply, _sender = socket.recvfrom(1024)
 
-  # reply looks like "ACK|3|echo: packet 3" -- split it apart and pull the
-  # seq number back out (as an integer, via .to_i) so we can track it.
-  _type, seq, info = reply.split("|", 3)
-  seq = seq.to_i
-  received_seqs << seq
-  puts "recv seq=#{seq} (#{info.inspect})"
+  reply_pkt = Packet.parse(reply)
+  received_seqs << reply_pkt.seq
+  puts "recv seq=#{reply_pkt.seq} (#{reply_pkt.payload.inspect})"
 end
 
 # 3. Compare what we sent vs. what came back.
@@ -57,7 +59,7 @@ puts "sent:     #{PACKET_COUNT}"
 puts "received: #{received_seqs.size}"
 
 all_seqs = (0...PACKET_COUNT).to_a
-missing = all_seqs - received_seqs # Array#- returns elements in the left array not present in the right one
+missing = all_seqs - received_seqs
 puts "lost:     #{missing.size} #{missing.inspect}"
 
 puts "arrival order:  #{received_seqs.inspect}"
