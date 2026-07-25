@@ -1,0 +1,24 @@
+RUDP — a Reliable UDP stack, built from scratch in Ruby
+=========================================================
+
+Plain UDP gives you speed but no promises: packets can be dropped, delayed,
+duplicated, or reordered, and the operating system will never tell you.
+This project builds the missing reliability layer on top, one mechanism at
+a time — sequence numbers, acknowledgements, retransmission, a sliding
+window, and a receiver-side reorder buffer — until sending data over a
+badly behaved network feels as safe as a local function call.
+
+This file is the payload for that final proof: it is being split into
+fixed-size chunks, sent across a simulated network that drops ~30% of
+packets and randomly delays the rest by up to a second, and reassembled
+on the other side using nothing but the pieces built along the way.
+
+A few deliberately awkward bytes | to make sure the wire format survives
+them: pipe characters like this one, a tab character right here -> "	" <-,
+and some non-ASCII text for good measure: café, naïve, Zürich, 東京.
+
+If the file you are reading right now (received/hello.txt) is byte-for-byte
+identical to sample_files/hello.txt — SHA256 checksums included — then
+every layer worked: chunking, the sliding window, retransmission on loss,
+duplicate suppression, and in-order reassembly despite packets arriving
+scrambled. That is the whole point of RUDP.
